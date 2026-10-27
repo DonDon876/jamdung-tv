@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jamdung TV</title>
+<!--
+  Jamdung TV screen: the big scoreboard on the living-room TV while the phone is on someone's forehead.
+  The phone sends what's happening (screen, timer, scores, deck and the cards already played, never the card being
+  played) and this page only shows it. The same page is used everywhere:
+   - Chromecast / Google TV: this page is the Cast receiver, registered as https://<your site>/tv.html?cast=1;
+     the Android app sends on the urn:x-cast:com.jamdung.tv channel (see README "TV mode")
+   - Android app on a cable or Smart View screen, and iPhone with AirPlay: the app shows this page on the TV and calls tvState()
+   - a browser: the game opens it as a window ("Open TV screen"), or casts it from Chrome
+  Built for Chromecast's older browsers too: no color-mix, :has or other new CSS.
+-->
+<!--gf--><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Caveat+Brush&family=Fredoka:wght@400..700&family=Nunito:wght@400..900&family=Permanent+Marker&family=Plus+Jakarta+Sans:wght@400..800&family=Righteous&family=Unbounded:wght@500..800&display=swap"><!--/gf-->
+<style id="embedded-fonts"></style>
+<style>
+:root{
+  --bg:#070806;--surface:#131711;--text:#f6f2e6;--muted:#9aa192;--accent:#f7c63d;--correct:#17b86a;--skip:#f0484e;--btn-text:#140f04;
+  --font-display:'Unbounded',system-ui,sans-serif;--font-body:'Plus Jakarta Sans',system-ui,sans-serif;--radius:22px;
+  /* derived from the colours above by applyTheme() */
+  --line:rgba(246,242,230,.1);--line2:rgba(246,242,230,.2);--glass:rgba(19,23,17,.72);--glow-a:rgba(247,198,61,.2);--glow-c:rgba(23,184,106,.15);
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-body);-webkit-font-smoothing:antialiased;cursor:none}
+/* everything is laid out on a 1920 × 1080 stage, scaled to fit whatever the TV is */
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden;
+  background:radial-gradient(1000px 760px at 8% 0%,var(--glow-a),transparent 70%),radial-gradient(1100px 820px at 96% 104%,var(--glow-c),transparent 70%),var(--bg)}
+.top{position:absolute;left:72px;right:72px;top:46px;height:88px;display:flex;align-items:center;justify-content:space-between;gap:32px}
+.brand{display:flex;align-items:center;gap:22px;min-width:0;flex:none}
+.mark{width:66px;height:66px;border-radius:18px;overflow:hidden;flex:none;box-shadow:0 12px 32px -12px rgba(0,0,0,.7)}
+.mark svg{width:100%;height:100%;display:block}
+.logo{font-family:var(--font-display);font-weight:800;font-size:44px;letter-spacing:-.02em;white-space:nowrap}
+.logo small{font-family:var(--font-body);font-weight:700;font-size:26px;letter-spacing:0;color:var(--muted);margin-left:18px}
+.chips{display:flex;gap:16px;align-items:center;justify-content:flex-end;min-width:0}
+.chip{display:inline-flex;align-items:center;gap:14px;height:68px;padding:0 30px;border-radius:999px;background:var(--glass);border:2px solid var(--line);
+  font-weight:800;font-size:27px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;min-width:0;max-width:1000px}
+.chip span{overflow:hidden;text-overflow:ellipsis}
+.chip .lab{color:var(--muted);flex:none}
+.chip img{width:46px;height:46px;border-radius:12px;object-fit:cover;margin-left:-14px;flex:none}
+.chip.pop{animation:pop .5s var(--ease)}
+#view{position:absolute;left:72px;right:72px;top:168px;bottom:206px}
+#scores{position:absolute;left:72px;right:72px;bottom:54px;height:122px;display:flex;gap:22px;justify-content:center}
+.score{--c:var(--accent);flex:1 1 0;max-width:440px;min-width:0;display:flex;align-items:center;gap:20px;padding:0 32px;border-radius:calc(var(--radius) + 8px);
+  background:var(--glass);border:3px solid var(--line);transition:border-color .4s,box-shadow .4s,transform .4s var(--ease)}
+.score .dot{width:24px;height:24px;border-radius:50%;flex:none;background:var(--c);box-shadow:0 0 18px var(--c)}
+.score .nm{flex:1;min-width:0;font-weight:800;font-size:32px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.score b{font-family:var(--font-display);font-weight:800;font-size:60px;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.score.now{border-color:var(--c);transform:translateY(-6px);box-shadow:0 26px 60px -24px var(--c)}
+.score.bump b{animation:pop .6s var(--ease)}
+.eyebrow{font-weight:800;font-size:30px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+.rasta{height:8px;width:150px;border-radius:8px;background:linear-gradient(90deg,var(--skip) 0 33.33%,var(--accent) 33.33% 66.66%,var(--correct) 66.66%)}
+.hint{font-size:36px;font-weight:600;color:var(--muted);margin:0;text-align:center;max-width:1400px;line-height:1.35}
+.hint b{color:var(--text)}
+.center{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px;text-align:center}
+.huge{font-family:var(--font-display);font-weight:800;font-size:150px;line-height:1;letter-spacing:-.04em;margin:0;max-width:1700px;overflow-wrap:anywhere}
+.mark.big{width:170px;height:170px;border-radius:44px}
+.dots i{display:inline-block;width:18px;height:18px;margin:0 8px;border-radius:50%;background:var(--accent);animation:blink 1.4s infinite both}
+.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+@keyframes pop{0%{transform:scale(.6);opacity:0}60%{transform:scale(1.08);opacity:1}100%{transform:scale(1)}}
+@keyframes rise{from{transform:translateY(30px);opacity:0}}
+.in{animation:rise .6s var(--ease) both}
+
+/* countdown */
+.countnum{font-family:var(--font-display);font-weight:800;font-size:480px;line-height:.9;letter-spacing:-.06em;margin:0;color:var(--team);text-shadow:0 30px 120px var(--team);animation:pop .7s var(--ease)}
+
+/* play */
+.play{height:100%;display:flex;align-items:center;gap:90px}
+.ring{position:relative;width:690px;height:690px;flex:none}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg);display:block;overflow:visible}
+.ring circle{fill:none;stroke-width:38;stroke-linecap:round}
+.ring .track{stroke:var(--line)}
+.ring .prog{stroke:var(--team);stroke-dasharray:1000;filter:drop-shadow(0 0 22px var(--team))}
+.ring.low .prog{stroke:var(--skip);filter:drop-shadow(0 0 30px var(--skip))}
+.ring .num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .num b{font-family:var(--font-display);font-weight:800;font-size:300px;line-height:1;letter-spacing:-.05em;font-variant-numeric:tabular-nums}
+.ring .num span{font-weight:800;font-size:30px;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+.ring.low .num b{color:var(--skip);animation:beat 1s infinite}
+@keyframes beat{0%,100%{transform:scale(1)}15%{transform:scale(1.07)}}
+.side{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;gap:30px;padding-top:14px}
+.whose{display:flex;align-items:center;gap:22px;min-width:0}
+.whose .dot{width:30px;height:30px;border-radius:50%;flex:none;background:var(--team);box-shadow:0 0 22px var(--team)}
+.whose b{font-family:var(--font-display);font-weight:800;font-size:64px;letter-spacing:-.025em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tally{display:flex;gap:22px}
+.tally>div{flex:1;border-radius:calc(var(--radius) + 8px);background:var(--glass);border:2px solid var(--line);padding:20px 30px}
+.tally b{display:block;font-family:var(--font-display);font-weight:800;font-size:96px;line-height:1;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.tally span{font-weight:800;font-size:24px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.tally .t-ok b{color:var(--correct)}.tally .t-no b{color:var(--skip)}
+.tally b.bump{animation:pop .5s var(--ease)}
+.feed{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px;flex:1;min-height:0;overflow:hidden;
+  -webkit-mask-image:linear-gradient(180deg,#000 70%,transparent);mask-image:linear-gradient(180deg,#000 70%,transparent)}
+.feed li{display:flex;align-items:center;gap:20px;font-family:var(--font-display);font-weight:700;font-size:40px;letter-spacing:-.01em;min-width:0}
+.feed li.new{animation:slidein .5s var(--ease) both}
+@keyframes slidein{from{transform:translateX(-40px);opacity:0}}
+.feed .ic,.cards .ic{width:54px;height:54px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff}
+.feed .ic svg,.cards .ic svg{width:32px;height:32px;stroke:currentColor;stroke-width:3.2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.ok .ic{background:var(--correct)}.no .ic{background:var(--skip)}
+.feed .w,.cards .w{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.feed .w small,.cards .w small{font-family:var(--font-body);font-weight:600;font-size:.62em;color:var(--muted);margin-left:14px}
+.no .w{opacity:.62}
+.empty{font-size:34px;color:var(--muted);font-weight:600;margin:0}
+
+/* turn over */
+.turnend{height:100%;display:flex;flex-direction:column;gap:34px}
+.te-head{display:flex;align-items:flex-end;justify-content:space-between;gap:40px}
+.te-head h1{font-family:var(--font-display);font-weight:800;font-size:92px;line-height:1;letter-spacing:-.035em;margin:12px 0 0}
+.te-head .big{font-family:var(--font-display);font-weight:800;font-size:190px;line-height:.8;letter-spacing:-.05em;color:var(--team)}
+.cards{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:76px;gap:14px 34px;flex:1;min-height:0;overflow:hidden}
+.cards li{display:flex;align-items:center;gap:18px;font-family:var(--font-display);font-weight:700;font-size:32px;min-width:0;animation:rise .5s var(--ease) both}
+.cards .ic{width:46px;height:46px}.cards .ic svg{width:26px;height:26px}
+.more{font-size:30px;color:var(--muted);font-weight:700}
+
+/* final */
+.final{height:100%;display:flex;align-items:center;gap:100px}
+.final .hero{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:28px}
+.trophy{width:190px;height:190px;border-radius:56px;display:grid;place-items:center;color:var(--btn-text);
+  background:linear-gradient(140deg,var(--accent),#ffe08a 60%,var(--accent));box-shadow:0 30px 90px -20px var(--accent);animation:pop .8s var(--ease)}
+.trophy svg{width:104px;height:104px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.final h1{font-family:var(--font-display);font-weight:800;font-size:112px;line-height:1.02;letter-spacing:-.04em;margin:0;overflow-wrap:anywhere}
+.badge{display:inline-block;padding:14px 30px;border-radius:999px;background:var(--accent);color:var(--btn-text);font-weight:800;font-size:30px;letter-spacing:.06em;text-transform:uppercase}
+.ranks{list-style:none;margin:0;padding:0;width:760px;flex:none;display:flex;flex-direction:column;gap:18px}
+.ranks li{--c:var(--accent);display:flex;align-items:center;gap:24px;padding:22px 34px;border-radius:calc(var(--radius) + 8px);background:var(--glass);border:3px solid var(--line);animation:rise .6s var(--ease) both}
+.ranks li.win{border-color:var(--c);box-shadow:0 26px 70px -26px var(--c)}
+.ranks .rk{font-family:var(--font-display);font-weight:800;font-size:40px;color:var(--muted);width:56px}
+.ranks .dot{width:24px;height:24px;border-radius:50%;background:var(--c);flex:none}
+.ranks .nm{flex:1;min-width:0;font-weight:800;font-size:40px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ranks b{font-family:var(--font-display);font-weight:800;font-size:68px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+
+/* full-screen flash on every card, and the paused cover */
+.flash{position:absolute;inset:0;display:grid;place-items:center;z-index:5;font-family:var(--font-display);font-weight:800;font-size:220px;letter-spacing:-.04em;color:#fff;
+  text-shadow:0 20px 80px rgba(0,0,0,.35);pointer-events:none;animation:flash .8s ease-out both}
+.flash.ok{background:radial-gradient(closest-side,var(--correct),transparent 140%)}
+.flash.no{background:radial-gradient(closest-side,var(--skip),transparent 140%)}
+@keyframes flash{0%{opacity:0;transform:scale(1.04)}12%{opacity:.94;transform:scale(1)}65%{opacity:.85}100%{opacity:0}}
+.cover{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;background:rgba(0,0,0,.72);animation:rise .4s var(--ease)}
+.cover b{font-family:var(--font-display);font-weight:800;font-size:150px;letter-spacing:-.04em}
+#confetti{position:absolute;inset:0;z-index:4;pointer-events:none}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="stage">
+  <header class="top">
+    <div class="brand">
+      <span class="mark"><svg viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" fill="#0b0b0b"/><path d="M0 0H12L6 6Z M0 12H12L6 6Z" style="fill:var(--correct)"/><path d="M0 0L12 12M12 0L0 12" style="stroke:var(--accent)" stroke-width="2.2"/></svg></span>
+      <div class="logo"><span id="title">Jamdung</span><small>Jamaica Charades</small></div>
+    </div>
+    <div class="chips"><span class="chip" id="deckChip" hidden><img id="deckImg" alt="" hidden><span class="lab">Deck</span><span id="deckName"></span></span><span class="chip" id="roundChip" hidden></span></div>
+  </header>
+  <main id="view"></main>
+  <footer id="scores"></footer>
+</div>
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const TEAM_COLORS=['var(--accent)','var(--correct)','var(--skip)','#5ac8fa','#c084fc','#fb923c'];   // same order as the game
+const teamColor=i=>TEAM_COLORS[(i|0)%TEAM_COLORS.length];
+const MARK=$('.mark').innerHTML;
+const IC={ok:'<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',no:'<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  trophy:'<svg viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a4 4 0 0 1-4 4M7 5H4v2a4 4 0 0 0 4 4"/></svg>'};
+
+// fit the 1920 × 1080 stage to the screen
+function fit(){const st=$('#stage'),k=Math.min(innerWidth/1920,innerHeight/1080);
+  st.style.transform='scale('+k+')';st.style.left=(innerWidth-1920*k)/2+'px';st.style.top=(innerHeight-1080*k)/2+'px'}
+addEventListener('resize',fit);fit();
+
+// ---------- the phone's colours and fonts (Settings → Look / the published theme) ----------
+const HEX=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i,FONT=/^[A-Za-z0-9' -]{1,40}$/;
+function rgba(hex,a){let h=hex.slice(1);if(h.length===3)h=h.replace(/./g,'$&$&');const n=parseInt(h,16);return 'rgba('+(n>>16&255)+','+(n>>8&255)+','+(n&255)+','+a+')'}
+let themeKey='';
+function applyTheme(t){
+  if(!t||typeof t!=='object')return;const key=JSON.stringify(t);if(key===themeKey)return;themeKey=key;
+  const r=document.documentElement.style,col=(k,v)=>{if(HEX.test(v||''))r.setProperty(k,v)};
+  col('--bg',t.bg);col('--surface',t.surface);col('--text',t.text);col('--muted',t.muted);col('--accent',t.accent);col('--correct',t.correct);col('--skip',t.skip);col('--btn-text',t.btnText);
+  if(FONT.test(t.display||''))r.setProperty('--font-display',t.display+',system-ui,sans-serif');
+  if(FONT.test(t.body||''))r.setProperty('--font-body',t.body+',system-ui,sans-serif');
+  if(isFinite(t.radius))r.setProperty('--radius',Math.max(0,Math.min(40,+t.radius))+'px');
+  const text=HEX.test(t.text||'')?t.text:'#f6f2e6',surf=HEX.test(t.surface||'')?t.surface:'#131711';
+  r.setProperty('--line',rgba(text,.11));r.setProperty('--line2',rgba(text,.2));r.setProperty('--glass',rgba(surf,.74));
+  if(HEX.test(t.accent||''))r.setProperty('--glow-a',rgba(t.accent,t.dark===false?.16:.2));
+  if(HEX.test(t.correct||''))r.setProperty('--glow-c',rgba(t.correct,t.dark===false?.12:.15));
+}
+
+// "GYAL (Girl)" → GYAL with "Girl" smaller, as on the phone
+function cardHtml(w){
+  w=String(w||'');let main=w,extra='';
+  const m=/^([\s\S]*\S)\s*\(([^()\n]+)\)\s*$/.exec(w);
+  if(m){main=m[1];extra=m[2]}else{const i=w.indexOf('\n');if(i>=0){main=w.slice(0,i);extra=w.slice(i+1).split('\n').map(s=>s.trim()).filter(Boolean).join(' · ')}}
+  return esc(main.replace(/\s+/g,' ').trim())+(extra?'<small>'+esc(extra.trim())+'</small>':'');
+}
+
+// ---------- showing a state from the phone ----------
+let S=null,shown='',lastMsg=0;
+const T={endAt:0,ms:0,paused:true,secs:60,raf:0};
+function take(d){
+  if(typeof d==='string'){try{d=JSON.parse(d)}catch(e){return}}
+  if(!d||typeof d!=='object'||d.v!==1||typeof d.s!=='string')return;
+  lastMsg=Date.now();const prev=S;S=d;
+  applyTheme(d.theme);
+  $('#title').textContent=d.title||'Jamdung';
+  drawTop(d,prev);drawScores(d,prev);
+  ({menu:menu,ready:ready,count:count,play:play,turn:turnOver,final:final}[d.s]||menu)(d,prev);
+  cover(d.s==='play'&&d.paused);
+}
+window.tvState=take;   // the Android and iPhone apps call this
+
+function drawTop(d,prev){
+  const chip=$('#deckChip'),inGame=d.s!=='menu'&&!!d.deck;chip.hidden=!inGame;
+  if(inGame)$('#deckChip .lab').textContent=d.s==='play'&&d.mixed?'Card from':d.mixed?'Decks':'Deck';
+  if(inGame&&$('#deckName').textContent!==d.deck){
+    $('#deckName').textContent=d.deck;
+    const img=$('#deckImg');if(/^https:\/\//.test(d.img||'')){img.src=d.img;img.hidden=false}else img.hidden=true;
+    if(prev&&prev.s==='play'&&d.s==='play'){chip.classList.remove('pop');void chip.offsetWidth;chip.classList.add('pop')}
+  }
+  const rc=$('#roundChip');rc.hidden=!(d.rounds>1&&/^(ready|count|play|turn)$/.test(d.s));
+  if(!rc.hidden)rc.textContent='Round '+d.round+' of '+d.rounds;
+}
+function drawScores(d,prev){
+  const box=$('#scores'),teams=Array.isArray(d.teams)?d.teams:[],show=teams.length&&d.s!=='final'&&!(d.solo&&d.s==='play');
+  box.hidden=!show;if(!show)return;
+  const key=teams.map(t=>t.n).join('|');
+  if(box.dataset.key!==key){box.dataset.key=key;
+    box.innerHTML=teams.map((t,i)=>'<div class="score" style="--c:'+teamColor(i)+'"><span class="dot"></span><span class="nm">'+esc(t.n)+'</span><b>0</b></div>').join('')}
+  const els=box.children,pt=prev&&Array.isArray(prev.teams)?prev.teams:[];
+  teams.forEach((t,i)=>{const el=els[i];if(!el)return;const b=el.querySelector('b');
+    if(b.textContent!==String(t.s)){b.textContent=t.s;if(pt[i]&&pt[i].s!==t.s){el.classList.remove('bump');void el.offsetWidth;el.classList.add('bump')}}
+    el.classList.toggle('now',d.s!=='menu'&&i===d.turn&&teams.length>1)});
+}
+function view(name,html){const v=$('#view');v.dataset.v=name;v.innerHTML=html;stopRing()}
+const setTeam=d=>document.documentElement.style.setProperty('--team',teamColor(d.turn));
+
+function waiting(){
+  view('wait','<div class="center"><div class="mark big in">'+MARK+'</div><h1 class="huge in">'+esc($('#title').textContent)+'</h1>'+
+    '<p class="hint in">Open Jamdung on the phone and tap the <b>TV</b> button</p><div class="dots"><i></i><i></i><i></i></div></div>');
+  $('#scores').hidden=true;
+}
+function menu(d){
+  if($('#view').dataset.v==='menu')return;
+  view('menu','<div class="center"><div class="mark big in">'+MARK+'</div><h1 class="huge in">'+esc(d.title||'Jamdung')+'</h1>'+
+    '<span class="rasta"></span><p class="hint in">Pick your decks on the phone and press <b>Start</b></p></div>');
+}
+function ready(d){
+  setTeam(d);
+  view('ready','<div class="center"><span class="eyebrow in">Up next</span><h1 class="huge in" style="color:var(--team)">'+esc((d.teams[d.turn]||{}).n)+'</h1>'+
+    '<span class="rasta"></span><p class="hint in">'+(d.mode==='tilt'?'Guesser: phone on your forehead, screen facing your team. Tilt down for <b>Yeah Man!</b>, up to skip.'
+      :'Actor: only you look at the phone. Everybody else, shout it out!')+' <b>'+(d.secs|0)+' seconds!</b></p></div>');
+}
+function count(d){
+  setTeam(d);
+  view('count','<div class="center"><span class="eyebrow">'+esc((d.teams[d.turn]||{}).n)+' · get ready</span><p class="countnum">'+Math.max(1,d.count|0)+'</p></div>');
+}
+
+// the turn: a big countdown ring that runs smoothly on its own between the phone's once-a-second updates
+function play(d,prev){
+  setTeam(d);
+  const v=$('#view'),same=v.dataset.v==='play'&&prev&&prev.tid===d.tid;
+  if(!same){
+    view('play','<div class="play"><div class="ring" id="ring"><svg viewBox="0 0 600 600" aria-hidden="true"><circle class="track" cx="300" cy="300" r="262"/>'+
+      '<circle class="prog" id="prog" cx="300" cy="300" r="262" pathLength="1000"/></svg><div class="num"><b id="secs"></b><span>seconds</span></div></div>'+
+      '<div class="side"><div class="whose"><span class="dot"></span><b>'+esc((d.teams[d.turn]||{}).n)+'</b></div>'+
+      '<div class="tally"><div class="t-pts"><b id="pts">0</b><span>this turn</span></div><div class="t-ok"><b id="gotN">0</b><span>Yeah man!</span></div><div class="t-no"><b id="noN">0</b><span>Skipped</span></div></div>'+
+      '<ul class="feed" id="feed"><li><p class="empty">Cards your team gets show up here</p></li></ul></div></div>');
+    v.dataset.n='0';
+  }
+  const log=Array.isArray(d.log)?d.log:[],n=d.n|0,had=+v.dataset.n||0;
+  num('#pts',d.pts|0);num('#gotN',d.got|0);num('#noN',d.no|0);
+  if(n!==had){
+    v.dataset.n=String(n);
+    $('#feed').innerHTML=log.slice(-8).reverse().map((x,i)=>'<li class="'+(x[1]?'ok':'no')+(i<n-had?' new':'')+'"><span class="ic">'+(x[1]?IC.ok:IC.no)+'</span><span class="w">'+cardHtml(x[0])+'</span></li>').join('')||
+      '<li><p class="empty">Cards your team gets show up here</p></li>';
+    if(same&&n>had&&log.length)flash(log[log.length-1][1]);
+  }
+  T.secs=Math.max(1,d.secs|0);T.paused=!!d.paused;T.ms=Math.max(0,+d.ms||0);T.endAt=performance.now()+T.ms;
+  if(!T.raf)T.raf=requestAnimationFrame(tick);
+}
+function num(sel,n){const el=$(sel);if(el&&el.textContent!==String(n)){const was=el.textContent!=='';el.textContent=n;if(was){el.classList.remove('bump');void el.offsetWidth;el.classList.add('bump')}}}
+function tick(){
+  T.raf=0;const p=$('#prog');if(!p)return;
+  const ms=T.paused?T.ms:Math.max(0,T.endAt-performance.now()),s=Math.ceil(ms/1000);
+  p.style.strokeDashoffset=String(1000-1000*Math.min(1,ms/(T.secs*1000)));
+  const b=$('#secs');if(b.textContent!==String(s))b.textContent=s;
+  $('#ring').classList.toggle('low',s<=10);
+  T.raf=requestAnimationFrame(tick);
+}
+function stopRing(){if(T.raf)cancelAnimationFrame(T.raf);T.raf=0}
+function flash(ok){
+  document.querySelectorAll('.flash').forEach(f=>f.remove());
+  const f=document.createElement('div');f.className='flash '+(ok?'ok':'no');f.textContent=ok?'Yeah Man!':'Skip';
+  $('#stage').appendChild(f);setTimeout(()=>f.remove(),850);
+}
+function cover(on){
+  const c=$('#paused');if(!on){if(c)c.remove();return}
+  if(c)return;const el=document.createElement('div');el.className='cover';el.id='paused';
+  el.innerHTML='<b>Paused</b><p class="hint">The game carries on when you\'re back in Jamdung on the phone</p>';$('#stage').appendChild(el);
+}
+
+function turnOver(d){
+  setTeam(d);
+  const log=Array.isArray(d.log)?d.log:[],max=15,extra=(d.n|0)-Math.min(log.length,max);
+  view('turn','<div class="turnend"><div class="te-head"><div><span class="eyebrow">Time up!</span><h1><span style="color:var(--team)">'+esc((d.teams[d.turn]||{}).n)+'</span> scored</h1>'+
+    '<p class="hint" style="text-align:left;margin-top:18px">'+(d.got|0)+' got · '+(d.no|0)+' skipped</p></div><div class="big">'+(d.pts|0)+'</div></div>'+
+    (log.length?'<ul class="cards">'+log.slice(0,max).map((x,i)=>'<li class="'+(x[1]?'ok':'no')+'" style="animation-delay:'+(i*40)+'ms"><span class="ic">'+(x[1]?IC.ok:IC.no)+'</span><span class="w">'+cardHtml(x[0])+'</span></li>').join('')+'</ul>'
+      :'<p class="empty">No cards this turn.</p>')+
+    (extra>0?'<p class="more">+ '+extra+' more on the phone</p>':'')+'</div>');
+}
+
+function final(d){
+  const teams=(Array.isArray(d.teams)?d.teams:[]).map((t,i)=>({n:t.n,s:t.s,i:i})).sort((a,b)=>b.s-a.s);
+  const tie=teams.length>1&&teams[0].s===teams[1].s,w=teams[0]||{n:'',s:0},single=teams.length===1;
+  const head=single?esc(w.n)+': '+w.s+' point'+(w.s===1?'':'s'):tie?"It's a tie!":'Big up, <span style="color:'+teamColor(w.i)+'">'+esc(w.n)+'</span>!';
+  const sub=single?(d.newBest?'<span class="badge">New best score!</span>':'<span class="eyebrow">Best score: '+(d.best|0)+'</span>'):'<span class="eyebrow">Final score</span>';
+  view('final','<div class="final"><div class="hero"><div class="trophy">'+IC.trophy+'</div>'+sub+'<h1>'+head+'</h1><span class="rasta"></span></div>'+
+    '<ol class="ranks">'+teams.map((t,k)=>'<li class="'+(k===0&&!tie&&t.s>0?'win':'')+'" style="--c:'+teamColor(t.i)+';animation-delay:'+(k*120)+'ms"><span class="rk">'+(k+1)+'</span><span class="dot"></span><span class="nm">'+esc(t.n)+'</span><b>'+t.s+'</b></li>').join('')+'</ol></div>');
+  if(single?d.newBest:!tie&&w.s>0)confetti();
+}
+// red, gold and green confetti for the winner
+function confetti(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const old=$('#confetti');if(old)old.remove();
+  const c=document.createElement('canvas');c.id='confetti';c.width=1920;c.height=1080;$('#stage').appendChild(c);
+  const x=c.getContext('2d'),cs=getComputedStyle(document.documentElement),cols=['--skip','--accent','--correct'].map(k=>cs.getPropertyValue(k).trim()||'#f7c63d');
+  // falls across the whole screen for about 5 seconds, so everybody in the room sees it
+  const bits=Array.from({length:260},()=>({x:Math.random()*1920,y:-Math.random()*1300-20,vx:(Math.random()-.5)*3,vy:5+Math.random()*6,r:Math.random()*Math.PI,vr:(Math.random()-.5)*.25,
+    w:16+Math.random()*16,h:9+Math.random()*10,c:cols[Math.random()*3|0],ph:Math.random()*6}));
+  const t0=performance.now();
+  (function step(now){
+    x.clearRect(0,0,1920,1080);const t=(now-t0)/1000;
+    for(const b of bits){b.y+=b.vy;b.x+=b.vx+Math.sin(t*3+b.ph)*1.2;b.r+=b.vr;x.save();x.translate(b.x,b.y);x.rotate(b.r);x.fillStyle=b.c;x.fillRect(-b.w/2,-b.h/2,b.w,b.h);x.restore()}
+    if(t<5.5&&c.isConnected)requestAnimationFrame(step);else c.remove();
+  })(t0);
+}
+
+// ---------- where the phone's messages come from ----------
+// a browser window opened by the game (or this page opened by hand next to it)
+addEventListener('message',e=>{const d=e.data;if(d&&typeof d.jamdungTv==='string')take(d.jamdungTv)});
+let bc=null;try{bc=new BroadcastChannel('jamdung-tv');bc.onmessage=e=>{if(typeof e.data==='string'&&e.data.charAt(0)==='{')take(e.data)};bc.postMessage('hello');
+  setInterval(()=>bc.postMessage('alive'),5000);addEventListener('pagehide',()=>bc.postMessage('bye'))}catch(e){}
+try{if(window.opener)window.opener.postMessage({jamdungTvHello:1},'*')}catch(e){}
+// Chrome's "Cast" (Presentation API): the game presents this page and sends over the connection
+if(/[?&]pres=1/.test(location.search)&&navigator.presentation&&navigator.presentation.receiver){
+  navigator.presentation.receiver.connectionList.then(list=>{
+    const hook=c=>{c.onmessage=e=>take(e.data)};list.connections.forEach(hook);list.onconnectionavailable=e=>hook(e.connection);
+  }).catch(()=>{});
+}
+// Chromecast / Google TV: this page is the Cast receiver (registered with ?cast=1 on the end)
+const CAST_NS='urn:x-cast:com.jamdung.tv';
+if(/[?&]cast=1/.test(location.search)){
+  const s=document.createElement('script');s.src='https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js';
+  s.onload=()=>{try{
+    const ctx=cast.framework.CastReceiverContext.getInstance(),sys=cast.framework.system;
+    ctx.addCustomMessageListener(CAST_NS,e=>take(e.data));
+    const o=new cast.framework.CastReceiverOptions();
+    o.skipPlayersLoad=true;o.disableIdleTimeout=true;o.statusText='Jamdung TV';o.customNamespaces={};o.customNamespaces[CAST_NS]=sys.MessageType.JSON;
+    // close when the phone stops casting (not when it just loses Wi-Fi for a moment)
+    ctx.addEventListener(sys.EventType.SENDER_DISCONNECTED,e=>{if(!ctx.getSenders().length&&e.reason===sys.DisconnectReason.REQUESTED_BY_SENDER)ctx.stop()});
+    ctx.start(o);
+  }catch(e){console.warn('Jamdung TV: Cast receiver did not start',e)}};
+  document.head.appendChild(s);
+}
+waiting();
+</script>
+</body>
+</html>
