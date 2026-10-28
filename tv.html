@@ -97,6 +97,18 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--
   -webkit-mask-image:linear-gradient(180deg,#000 70%,transparent);mask-image:linear-gradient(180deg,#000 70%,transparent)}
 .feed li{display:flex;align-items:center;gap:20px;font-family:var(--font-display);font-weight:700;font-size:40px;letter-spacing:-.01em;min-width:0}
 .feed li.new{animation:slidein .5s var(--ease) both}
+/* Card on TV (social gatherings and parties): the card being played, big enough to read across the room */
+.play.withcard{gap:70px}
+.play.withcard .ring{width:520px;height:520px}
+.play.withcard .ring .num b{font-size:190px}
+.ring .num b.three{font-size:225px}.play.withcard .ring .num b.three{font-size:145px}   /* 100 s and up stay inside the ring */
+.livecard{flex:none;border-radius:calc(var(--radius) + 14px);background:var(--glass);border:4px solid var(--accent);padding:22px 40px 28px;box-shadow:0 0 50px -10px var(--accent)}
+.livecard[hidden]{display:none}
+.livecard .lab{display:block;font-weight:800;font-size:24px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.livecard .word{font-family:var(--font-display);font-weight:800;line-height:1.04;letter-spacing:-.03em;overflow-wrap:anywhere}
+.livecard .word small{display:block;font-family:var(--font-body);font-weight:600;font-size:max(.42em,30px);letter-spacing:0;color:var(--muted);margin-top:10px}
+.livecard.pop{animation:pop .45s var(--ease)}
+.backnote{font-weight:800;font-size:40px;color:var(--accent);margin:0}
 @keyframes slidein{from{transform:translateX(-40px);opacity:0}}
 .feed .ic,.cards .ic{width:54px;height:54px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff}
 .feed .ic svg,.cards .ic svg{width:32px;height:32px;stroke:currentColor;stroke-width:3.2;fill:none;stroke-linecap:round;stroke-linejoin:round}
@@ -250,11 +262,13 @@ function ready(d){
   setTeam(d);
   view('ready','<div class="center"><span class="eyebrow in">Up next</span><h1 class="huge in" style="color:var(--team)">'+esc((d.teams[d.turn]||{}).n)+'</h1>'+
     '<span class="rasta"></span><p class="hint in">'+(d.mode==='tilt'?'Guesser: phone on your forehead, screen facing your team. Tilt down for <b>Yeah Man!</b>, up to skip.'
-      :'Actor: only you look at the phone. Everybody else, shout it out!')+' <b>'+(d.secs|0)+' seconds!</b></p></div>');
+      :'Actor: only you look at the phone. Everybody else, shout it out!')+' <b>'+(d.secs|0)+' seconds!</b></p>'+
+    (d.cardOn?'<p class="backnote in">The card shows up here: whoever is guessing, turn your back to the TV!</p>':'')+'</div>');
 }
 function count(d){
   setTeam(d);
-  view('count','<div class="center"><span class="eyebrow">'+esc((d.teams[d.turn]||{}).n)+' · get ready</span><p class="countnum">'+Math.max(1,d.count|0)+'</p></div>');
+  view('count','<div class="center"><span class="eyebrow">'+esc((d.teams[d.turn]||{}).n)+' · get ready</span><p class="countnum">'+Math.max(1,d.count|0)+'</p>'+
+    (d.cardOn?'<p class="backnote">Guessing? Back to the TV!</p>':'')+'</div>');
 }
 
 // the turn: a big countdown ring that runs smoothly on its own between the phone's once-a-second updates
@@ -265,10 +279,12 @@ function play(d,prev){
     view('play','<div class="play"><div class="ring" id="ring"><svg viewBox="0 0 600 600" aria-hidden="true"><circle class="track" cx="300" cy="300" r="262"/>'+
       '<circle class="prog" id="prog" cx="300" cy="300" r="262" pathLength="1000"/></svg><div class="num"><b id="secs"></b><span>seconds</span></div></div>'+
       '<div class="side"><div class="whose"><span class="dot"></span><b>'+esc((d.teams[d.turn]||{}).n)+'</b></div>'+
+      '<div class="livecard" id="liveCard" hidden><span class="lab">The card</span><div class="word" id="liveWord"></div></div>'+
       '<div class="tally"><div class="t-pts"><b id="pts">0</b><span>this turn</span></div><div class="t-ok"><b id="gotN">0</b><span>Yeah man!</span></div><div class="t-no"><b id="noN">0</b><span>Skipped</span></div></div>'+
       '<ul class="feed" id="feed"><li><p class="empty">Cards your team gets show up here</p></li></ul></div></div>');
     v.dataset.n='0';
   }
+  liveCard(d.card);
   const log=Array.isArray(d.log)?d.log:[],n=d.n|0,had=+v.dataset.n||0;
   num('#pts',d.pts|0);num('#gotN',d.got|0);num('#noN',d.no|0);
   if(n!==had){
@@ -277,15 +293,30 @@ function play(d,prev){
       '<li><p class="empty">Cards your team gets show up here</p></li>';
     if(same&&n>had&&log.length)flash(log[log.length-1][1]);
   }
+  fitFeed();
   T.secs=Math.max(1,d.secs|0);T.paused=!!d.paused;T.ms=Math.max(0,+d.ms||0);T.endAt=performance.now()+T.ms;
   if(!T.raf)T.raf=requestAnimationFrame(tick);
 }
+// Card on TV: the card being played (only sent while the phone's "Card on TV" is on), shrunk to fit 2 lines
+function liveCard(w){
+  const box=$('#liveCard'),el=$('#liveWord');if(!box)return;
+  $('.play').classList.toggle('withcard',!!w);box.hidden=!w;
+  if(!w){el.dataset.w='';return}
+  if(el.dataset.w===w)return;
+  el.dataset.w=w;el.innerHTML=cardHtml(w);
+  let fs=124;el.style.fontSize=fs+'px';
+  const side=box.parentElement,tally=side.querySelector('.tally'),over=()=>tally.getBoundingClientRect().bottom>side.getBoundingClientRect().bottom+1;
+  while(fs>56&&(el.scrollHeight>fs*1.04*3+Math.max(fs*.42,30)*1.3+10||el.scrollWidth>el.clientWidth+1||over())){fs-=6;el.style.fontSize=fs+'px'}   // up to 3 lines, scores still on screen
+  box.classList.remove('pop');void box.offsetWidth;box.classList.add('pop');
+}
+// the answered-cards list shows only rows that fit whole
+function fitFeed(){const f=$('#feed');if(!f)return;const h=f.clientHeight;for(const li of f.children){li.style.visibility='';li.style.visibility=li.offsetTop-f.offsetTop+li.offsetHeight>h+1?'hidden':''}}
 function num(sel,n){const el=$(sel);if(el&&el.textContent!==String(n)){const was=el.textContent!=='';el.textContent=n;if(was){el.classList.remove('bump');void el.offsetWidth;el.classList.add('bump')}}}
 function tick(){
   T.raf=0;const p=$('#prog');if(!p)return;
   const ms=T.paused?T.ms:Math.max(0,T.endAt-performance.now()),s=Math.ceil(ms/1000);
   p.style.strokeDashoffset=String(1000-1000*Math.min(1,ms/(T.secs*1000)));
-  const b=$('#secs');if(b.textContent!==String(s))b.textContent=s;
+  const b=$('#secs');if(b.textContent!==String(s)){b.textContent=s;b.classList.toggle('three',s>=100)}
   $('#ring').classList.toggle('low',s<=10);
   T.raf=requestAnimationFrame(tick);
 }
