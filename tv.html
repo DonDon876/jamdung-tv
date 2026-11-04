@@ -28,9 +28,10 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-body);-webkit-font-smoothing:antialiased;cursor:none}
-/* everything is laid out on a 1920 × 1080 stage, scaled to fit whatever the TV is */
-#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden;
-  background:radial-gradient(1000px 760px at 8% 0%,var(--glow-a),transparent 70%),radial-gradient(1100px 820px at 96% 104%,var(--glow-c),transparent 70%),var(--bg)}
+/* the glow fills the whole screen, so the TV-safe border around the stage doesn't show an edge */
+body{background:radial-gradient(52vw 70vh at 8% 0%,var(--glow-a),transparent 70%),radial-gradient(57vw 76vh at 96% 104%,var(--glow-c),transparent 70%),var(--bg)}
+/* everything is laid out on a 1920 × 1080 stage, scaled to fit inside the TV-safe area (see fit()) */
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden}
 .top{position:absolute;left:72px;right:72px;top:46px;height:88px;display:flex;align-items:center;justify-content:space-between;gap:32px}
 .brand{display:flex;align-items:center;gap:22px;min-width:0;flex:none}
 .mark{width:66px;height:66px;border-radius:18px;overflow:hidden;flex:none;box-shadow:0 12px 32px -12px rgba(0,0,0,.7)}
@@ -178,8 +179,11 @@ const MARK=$('.mark').innerHTML;
 const IC={ok:'<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',no:'<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   trophy:'<svg viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a4 4 0 0 1-4 4M7 5H4v2a4 4 0 0 0 4 4"/></svg>'};
 
-// fit the 1920 × 1080 stage to the screen
-function fit(){const st=$('#stage'),k=Math.min(innerWidth/1920,innerHeight/1080);
+// fit the 1920 × 1080 stage to the screen, inside the TV-safe area: many TVs zoom the picture ("overscan") and cut
+// 3-5% off every edge, so the stage uses the middle 90% by default. ?safe=100 uses the full screen (TVs set to Just Scan /
+// Screen fit), ?safe=85 leaves more room; anything from 70 to 100.
+const SAFE=(()=>{const m=/[?&]safe=(\d{2,3})/.exec(location.search),v=m?+m[1]:90;return Math.max(70,Math.min(100,v))/100})();
+function fit(){const st=$('#stage'),k=Math.min(innerWidth/1920,innerHeight/1080)*SAFE;
   st.style.transform='scale('+k+')';st.style.left=(innerWidth-1920*k)/2+'px';st.style.top=(innerHeight-1080*k)/2+'px'}
 addEventListener('resize',fit);fit();
 
